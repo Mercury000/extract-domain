@@ -3,7 +3,8 @@ name: Extract Domains and Push to GitHub
 on:
   push:
     branches:
-      - main  # 或者你希望触发此流程的其他分支
+      - main  # 仍然保持推送到 main 分支时触发
+  workflow_dispatch:  # 手动触发
 
 jobs:
   extract-and-push:
@@ -25,17 +26,24 @@ jobs:
 
     - name: Extract domains and create domains.txt
       run: |
+        # 使用正则表达式去除 DOMAIN-SUFFIX, 前缀并提取纯净域名
         grep -oP '(?<=DOMAIN-SUFFIX,)[^,]+' adrules.list > domains.txt
+
+    - name: Check the file status before committing
+      run: git status  # 查看文件状态，确认是否有变化
 
     - name: Commit and push domains.txt to the repository
       run: |
         git config user.name "GitHub Action"
         git config user.email "github-action@users.noreply.github.com"
         
-        # 添加 domains.txt 到暂存区
+        # 确保将 domains.txt 添加到暂存区
         git add domains.txt
         
-        # 提交更改
+        # 检查是否有文件需要提交
+        git status
+        
+        # 提交更改，如果没有更改则不会提交
         git commit -m "Update domains.txt with new list of domains" || echo "No changes to commit"
         
         # 推送到远程仓库
