@@ -1,53 +1,81 @@
 name: Extract Domains and Push to GitHub
 
 on:
-  push:
-    branches:
-      - main  # 仍然保持推送到 main 分支时触发
-  workflow_dispatch:  # 手动触发
+  schedule:
+    - cron: '0 7,15 * * *'   # 每天北京时间 15:00 23:00 执行
+  workflow_dispatch:        # 支持手动运行
 
 jobs:
-  extract-and-push:
+  extract:
     runs-on: ubuntu-latest
-
     steps:
-    - name: Checkout the repository
-      uses: actions/checkout@v3
+      - name: 检出仓库
+        uses: actions/checkout@v4
 
-    - name: Set up SSH keys
-      run: |
-        mkdir -p ~/.ssh
-        echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
-        chmod 600 ~/.ssh/id_rsa
-        ssh-keyscan github.com >> ~/.ssh/known_hosts
+      - name: 设置 SSH 密钥
+        uses: webfactory/ssh-agent@v0.5.1
+        with:
+          ssh-private-key: ${{ secrets.ACTIONS_DEPLOY_KEY }}
 
-    - name: Download the ADRules list file
-      run: curl -sL https://raw.githubusercontent.com/Cats-Team/AdRules/main/adrules.list -o adrules.list
+      - name: 配置 Git 用户信息
+        run: |
+          git config --global user.name "${{ github.actor }}"
+          git config --global user.email "${{ github.actor }}@users.noreply.github.com"
+          git remote set-url origin git@github.com:Mercury000/extract-domain.git
+          git fetch
 
-    - name: Extract domains and create domains.txt
-      run: |
-        # 使用正则表达式去除 DOMAIN-SUFFIX, 前缀并提取纯净域名
-        grep -oP '(?<=DOMAIN-SUFFIX,)[^,]+' adrules.list > domains.txt
+      - name: 下载 adrules.list 文件
+        run: |
+          curl -s -o adrules.list https://raw.githubusercontent.com/Cats-Team/AdRules/main/adrules.list
 
-    - name: Display domains.txt contents
-      run: cat domains.txt  # 输出 domains.txt 内容，检查其是否正确
+      - name: 生成当前文件的 MD5 值
+        id: generate_md5
+        run: |
+          ADRULES_MD5=$(md5sum adrules.list | awk '{print $1}')
+          echo "ADRULES_MD5=$ADRULES_MD5" >> $GITHUB_ENV
 
-    - name: Check the file status before committing
-      run: git status  # 查看文件状态，确认是否有变化
+      - name: 加载或创建 md5_hashes.txt
+        id: load_or_create_md5
+        run: |
+          if [ -f md5_hashes.txt ]; then
+            source md5_hashes.txt
+            echo "PREVIOUS_ADRULES_MD5=$ADRULES_MD5" >> $GITHUB_ENV
+            echo "✅ 已加载上一次保存的 MD5 值。"
+          else
+            echo "⚠️ 未找到 md5_hashes.txt，正在创建新的哈希记录文件..."
+            echo "ADRULES_MD5=$ADRULES_MD5" > md5_hashes.txt
+            echo "PREVIOUS_ADRULES_MD5=$ADRULES_MD5" >> $GITHUB_ENV
+            echo "🆕 首次运行：已保存初始 MD5 值到 md5_hashes.txt"
+          fi
 
-    - name: Commit and push domains.txt to the repository
-      run: |
-        git config user.name "GitHub Action"
-        git config user.email "github-action@users.noreply.github.com"
-        
-        # 确保将 domains.txt 添加到暂存区
-        git add domains.txt
-        
-        # 再次检查文件状态，确认是否已正确添加
-        git status
-        
-        # 提交更改，如果没有更改则不会提交
-        git commit -m "Update domains.txt with new list of domains" || echo "No changes to commit"
-        
-        # 推送到远程仓库
-        git push --set-upstream git@github.com:Mercury000/extract-domain.git main
+      - name: 判断是否需要更新
+        id: check_update
+        run: |
+          NEED_UPDATE=false
+          if [ "$ADRULES_MD5" != "$PREVIOUS_ADRULES_MD5" ]; then
+            echo "🔄 检测到 adrules.list 内容发生变化，准备执行转换任务。"
+            NEED_UPDATE=true
+          else
+            echo "✅ 文件自上次运行以来未发生变化，跳过后续处理。"
+            exit 0
+          fi
+          echo "NEED_UPDATE=$NEED_UPDATE" >> $GITHUB_ENV
+
+      - name: 更新并保存当前 MD5 值
+        if: env.NEED_UPDATE == 'true'
+        run: |
+          echo "💾 正在更新 md5_hashes.txt 文件中的 MD5 值..."
+          echo "ADRULES_MD5=$ADRULES_MD5" > md5_hashes.txt
+
+      - name: 提取域名并保存为 domains.txt
+        if: env.NEED_UPDATE == 'true'
+        run: |
+          # 提取域名并去除前缀
+          grep -oP '(?<=DOMAIN-SUFFIX,)[^,]+' adrules.list > domains.txt
+
+      - name: 提交并推送更改
+        if: env.NEED_UPDATE == 'true'
+        uses: stefanzweifel/git-auto-commit-action@v4
+        with:
+          file_pattern: "domains.txt md5_hashes.txt"
+          commit_message: 更新提取的域名和 MD5 哈希值
