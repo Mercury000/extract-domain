@@ -33,6 +33,7 @@ jobs:
         run: |
           ADRULES_MD5=$(md5sum adrules.list | awk '{print $1}')
           echo "ADRULES_MD5=$ADRULES_MD5" >> $GITHUB_ENV
+          echo "MD5值已生成: $ADRULES_MD5"
 
       - name: 加载或创建 md5_hashes.txt
         id: load_or_create_md5
@@ -44,41 +45,49 @@ jobs:
           else
             echo "⚠️ 未找到 md5_hashes.txt，正在创建新的哈希记录文件..."
             echo "ADRULES_MD5=$ADRULES_MD5" > md5_hashes.txt
-            echo "PREVIOUS_ADRULES_MD5=$ADRULES_MD5" >> $GITHUB_ENV
-            echo "🆕 首次运行：已保存初始 MD5 值到 md5_hashes.txt"
+            # 首次运行时将 PREVIOUS 设为空值以确保触发更新
+            echo "PREVIOUS_ADRULES_MD5=" >> $GITHUB_ENV
+            echo "🆕 已创建初始 md5_hashes.txt 文件"
           fi
 
       - name: 判断是否需要更新
         id: check_update
         run: |
-          NEED_UPDATE=false
-          if [ ! -f md5_hashes.txt ] || [ "$ADRULES_MD5" != "$PREVIOUS_ADRULES_MD5" ]; then
-            echo "🔄 检测到需要更新（首次运行或文件内容变化）"
-            NEED_UPDATE=true
+          if [ ! -f md5_hashes.txt ] || [ -z "$PREVIOUS_ADRULES_MD5" ] || [ "$ADRULES_MD5" != "$PREVIOUS_ADRULES_MD5" ]; then
+            echo "🔄 需要更新：首次运行或文件内容已变化"
+            echo "NEED_UPDATE=true" >> $GITHUB_ENV
           else
-            echo "✅ 文件自上次运行以来未发生变化，跳过后续处理。"
+            echo "✅ 文件未变化，跳过后续步骤"
             exit 0
           fi
-          echo "NEED_UPDATE=$NEED_UPDATE" >> $GITHUB_ENV
 
-      - name: 更新并保存当前 MD5 值
+      - name: 强制创建或更新 MD5 文件
         if: env.NEED_UPDATE == 'true'
         run: |
-          echo "💾 正在更新 md5_hashes.txt 文件中的 MD5 值..."
+          echo "💾 正在更新 md5_hashes.txt..."
           echo "ADRULES_MD5=$ADRULES_MD5" > md5_hashes.txt
+          echo "当前MD5值: $(cat md5_hashes.txt)"
 
       - name: 提取域名并保存为 domains.txt
         if: env.NEED_UPDATE == 'true'
         run: |
-          # 清空或创建文件
+          echo "开始提取域名..."
           : > domains.txt
-          # 提取DOMAIN-SUFFIX和DOMAIN类型的记录
           grep -E '^(DOMAIN-SUFFIX|DOMAIN),' adrules.list | awk -F, '{print $2}' | sort -u > domains.txt
-          echo "提取完成，共 $(wc -l < domains.txt) 个域名"
+          echo "共提取 $(wc -l < domains.txt) 个唯一域名"
+
+      - name: 检查文件变更
+        if: env.NEED_UPDATE == 'true'
+        run: |
+          echo "=== 文件变更状态 ==="
+          git status --porcelain
+          echo "==================="
 
       - name: 提交并推送更改
         if: env.NEED_UPDATE == 'true'
         uses: stefanzweifel/git-auto-commit-action@v4
         with:
           file_pattern: "domains.txt md5_hashes.txt"
-          commit_message: 更新提取的域名和 MD5 哈希值
+          commit_message: "更新：$(date '+%Y-%m-%d %H:%M') 的域名列表和MD5校验"
+          commit_user_name: "GitHub Actions"
+          commit_user_email: "actions@github.com"
