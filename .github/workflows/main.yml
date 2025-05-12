@@ -29,6 +29,9 @@ jobs:
         # 使用正则表达式去除 DOMAIN-SUFFIX, 前缀并提取纯净域名
         grep -oP '(?<=DOMAIN-SUFFIX,)[^,]+' adrules.list > domains.txt
 
+    - name: Display domains.txt contents
+      run: cat domains.txt  # 输出 domains.txt 内容，检查其是否正确
+
     - name: Check the file status before committing
       run: git status  # 查看文件状态，确认是否有变化
 
@@ -40,7 +43,7 @@ jobs:
         # 确保将 domains.txt 添加到暂存区
         git add domains.txt
         
-        # 检查是否有文件需要提交
+        # 再次检查文件状态，确认是否已正确添加
         git status
         
         # 提交更改，如果没有更改则不会提交
