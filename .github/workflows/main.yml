@@ -1,89 +1,84 @@
 name: Extract Domains and Push to GitHub
 
 on:
-  schedule:
-    - cron: '0 7,15 * * *'   # 每天北京时间 15:00 23:00 执行
-  workflow_dispatch:        # 支持手动运行
+  schedule:
+    - cron: '0 7,15 * * *'   # 每天北京时间 15:00 23:00 执行
+  workflow_dispatch:        # 支持手动运行
 
 jobs:
-  extract:
-    runs-on: ubuntu-latest
-    steps:
-      - name: 检出仓库
-        uses: actions/checkout@v4
+  extract:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出仓库
+        uses: actions/checkout@v4
 
-      - name: 设置 SSH 密钥
-        uses: webfactory/ssh-agent@v0.5.1
-        with:
-          ssh-private-key: ${{ secrets.ACTIONS_DEPLOY_KEY }}
+      - name: 设置 SSH 密钥
+        uses: webfactory/ssh-agent@v0.5.1
+        with:
+          ssh-private-key: ${{ secrets.ACTIONS_DEPLOY_KEY }}
 
-      - name: 配置 Git 用户信息
-        run: |
-          git config --global user.name "${{ github.actor }}"
-          git config --global user.email "${{ github.actor }}@users.noreply.github.com"
-          git remote set-url origin git@github.com:Mercury000/extract-domain.git
-          git fetch
+      - name: 配置 Git 用户信息
+        run: |
+          git config --global user.name "${{ github.actor }}"
+          git config --global user.email "${{ github.actor }}@users.noreply.github.com"
+          git remote set-url origin git@github.com:Mercury000/extract-domain.git
+          git fetch
 
-      - name: 下载 adrules.list 文件
-        run: |
-          curl -s -o adrules.list https://raw.githubusercontent.com/Cats-Team/AdRules/main/adrules.list
+      - name: 下载 adrules.list 文件
+        run: |
+          curl -s -o adrules.list https://raw.githubusercontent.com/Cats-Team/AdRules/main/adrules.list
 
-      - name: 生成当前文件的 MD5 值
-        id: generate_md5
-        run: |
-          ADRULES_MD5=$(md5sum adrules.list | awk '{print $1}')
-          echo "ADRULES_MD5=$ADRULES_MD5" >> $GITHUB_ENV
+      - name: 生成当前文件的 MD5 值
+        id: generate_md5
+        run: |
+          ADRULES_MD5=$(md5sum adrules.list | awk '{print $1}')
+          echo "ADRULES_MD5=$ADRULES_MD5" >> $GITHUB_ENV
 
-      - name: 加载或创建 md5_hashes.txt
-        id: load_or_create_md5
-        run: |
-          if [ -f md5_hashes.txt ]; then
-            # 直接读取文件内容，而不是用 source（因为 source 适用于 shell 变量）
-            PREVIOUS_ADRULES_MD5=$(grep 'ADRULES_MD5=' md5_hashes.txt | cut -d'=' -f2)
-            echo "PREVIOUS_ADRULES_MD5=$PREVIOUS_ADRULES_MD5" >>$GITHUB_ENV
-            echo "✅ 已加载上一次保存的 MD5 值。"
-          else
-            echo "⚠️ 未找到 md5_hashes.txt，正在创建新的哈希记录文件..."
-            echo "ADRULES_MD5=$ADRULES_MD5" > md5_hashes.txt
-            echo "PREVIOUS_ADRULES_MD5=$ADRULES_MD5" >> $GITHUB_ENV
-            echo "🆕 首次运行：已保存初始 MD5 值到 md5_hashes.txt"
-            # 首次运行时，直接标记为需要更新，以便提交 md5_hashes.txt
-            echo "NEED_UPDATE=true" >>$GITHUB_ENV
-          fi
+      - name: 加载或创建 md5_hashes.txt
+        id: load_or_create_md5
+        run: |
+          if [ -f md5_hashes.txt ]; then
+            source md5_hashes.txt
+            echo "PREVIOUS_ADRULES_MD5=$ADRULES_MD5" >> $GITHUB_ENV
+            echo "✅ 已加载上一次保存的 MD5 值。"
+          else
+            echo "⚠️ 未找到 md5_hashes.txt，正在创建新的哈希记录文件..."
+            echo "ADRULES_MD5=$ADRULES_MD5" > md5_hashes.txt
+            echo "PREVIOUS_ADRULES_MD5=$ADRULES_MD5" >> $GITHUB_ENV
+            echo "🆕 首次运行：已保存初始 MD5 值到 md5_hashes.txt"
+          fi
 
-      - name: 判断是否需要更新（排除首次运行）
-        id: check_update
-        if: env.PREVIOUS_ADRULES_MD5 != ""  # 仅当 PREVIOUS_ADRULES_MD5 已设置时才检查
-        run: |
-          NEED_UPDATE=false
-          if [ "$ADRULES_MD5" != "$PREVIOUS_ADRULES_MD5" ]; then
-            echo "🔄 检测到 adrules.list 内容发生变化，准备执行转换任务。"
-            NEED_UPDATE=true
-          else
-            echo "✅ 文件自上次运行以来未发生变化，跳过后续处理。"
-            exit 0
-          fi
-          echo "NEED_UPDATE=$NEED_UPDATE" >>$GITHUB_ENV
+      - name: 判断是否需要更新
+        id: check_update
+        run: |
+          NEED_UPDATE=false
+          if [ ! -f md5_hashes.txt ] || [ "$ADRULES_MD5" != "$PREVIOUS_ADRULES_MD5" ]; then
+            echo "🔄 检测到需要更新（首次运行或文件内容变化）"
+            NEED_UPDATE=true
+          else
+            echo "✅ 文件自上次运行以来未发生变化，跳过后续处理。"
+            exit 0
+          fi
+          echo "NEED_UPDATE=$NEED_UPDATE" >> $GITHUB_ENV
 
-      - name: 更新并保存当前 MD5 值
-        if: env.NEED_UPDATE == 'true'
-        run: |
-          echo "💾 正在更新 md5_hashes.txt 文件中的 MD5 值..."
-          echo "ADRULES_MD5=$ADRULES_MD5" > md5_hashes.txt
+      - name: 更新并保存当前 MD5 值
+        if: env.NEED_UPDATE == 'true'
+        run: |
+          echo "💾 正在更新 md5_hashes.txt 文件中的 MD5 值..."
+          echo "ADRULES_MD5=$ADRULES_MD5" > md5_hashes.txt
 
-      - name: 提取域名并保存为 domains.txt
-        if: env.NEED_UPDATE == 'true'
-        run: |
-          # 提取域名并去除前缀
-          grep -oP '(?<=DOMAIN-SUFFIX,)[^,]+' adrules.list > domains.txt
+      - name: 提取域名并保存为 domains.txt
+        if: env.NEED_UPDATE == 'true'
+        run: |
+          # 清空或创建文件
+          : > domains.txt
+          # 提取DOMAIN-SUFFIX和DOMAIN类型的记录
+          grep -E '^(DOMAIN-SUFFIX|DOMAIN),' adrules.list | awk -F, '{print $2}' | sort -u > domains.txt
+          echo "提取完成，共 $(wc -l < domains.txt) 个域名"
 
-      - name: 提交并推送更改
-        if: env.NEED_UPDATE == 'true'
-        uses: stefanzweifel/git-auto-commit-action@v4
-        with:
-          file_pattern: "domains.txt md5_hashes.txt"
-          commit_message: |
-            更新提取的域名和 MD5 哈希值
-            {% if env.PREVIOUS_ADRULES_MD5 == "" %} # 首次运行
-              (首次提交 md5_hashes.txt)
-            {% endif %}
+      - name: 提交并推送更改
+        if: env.NEED_UPDATE == 'true'
+        uses: stefanzweifel/git-auto-commit-action@v4
+        with:
+          file_pattern: "domains.txt md5_hashes.txt"
+          commit_message: 更新提取的域名和 MD5 哈希值
