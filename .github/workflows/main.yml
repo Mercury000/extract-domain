@@ -1,10 +1,9 @@
-name: Extract and Push Domains via SSH
+name: Extract Domains and Push to GitHub
 
 on:
   push:
     branches:
-      - main
-  workflow_dispatch:
+      - main  # 或者你希望触发此流程的其他分支
 
 jobs:
   extract-and-push:
@@ -12,33 +11,26 @@ jobs:
 
     steps:
     - name: Checkout the repository
-      uses: actions/checkout@v2
+      uses: actions/checkout@v3
 
-    - name: Download adrules.list from Cats-Team
-      run: |
-        curl -o adrules.list https://raw.githubusercontent.com/Cats-Team/AdRules/main/adrules.list
-
-    - name: Extract domains
-      run: |
-        grep -oP '(?<=DOMAIN-SUFFIX,).+' adrules.list > domains.txt
-
-    - name: Set up SSH
+    - name: Set up SSH keys
       run: |
         mkdir -p ~/.ssh
         echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
         chmod 600 ~/.ssh/id_rsa
-
-        # Add GitHub to known_hosts to prevent interactive prompt
         ssh-keyscan github.com >> ~/.ssh/known_hosts
-        chmod 644 ~/.ssh/known_hosts
 
-    - name: Set up Git config
-      run: |
-        git config --global user.name "GitHub Actions"
-        git config --global user.email "actions@github.com"
+    - name: Download the ADRules list file
+      run: curl -sL https://raw.githubusercontent.com/Cats-Team/AdRules/main/adrules.list -o adrules.list
 
-    - name: Commit and push via SSH
+    - name: Extract domains and create domains.txt
       run: |
+        grep -oP '(?<=DOMAIN-SUFFIX,)[^,]+' adrules.list > domains.txt
+
+    - name: Commit and push to the repository
+      run: |
+        git config user.name "GitHub Action"
+        git config user.email "github-action@users.noreply.github.com"
         git add domains.txt
-        git commit -m "Add extracted domains via SSH"
-        git push git@github.com:Mercury000/extract-domain.git HEAD:main
+        git commit -m "Update domains.txt with new list of domains"
+        git push --set-upstream git@github.com:Mercury000/extract-domain.git main
