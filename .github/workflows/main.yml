@@ -27,10 +27,16 @@ jobs:
       run: |
         grep -oP '(?<=DOMAIN-SUFFIX,)[^,]+' adrules.list > domains.txt
 
-    - name: Commit and push to the repository
+    - name: Commit and push domains.txt to the repository
       run: |
         git config user.name "GitHub Action"
         git config user.email "github-action@users.noreply.github.com"
+        
+        # 添加 domains.txt 到暂存区
         git add domains.txt
-        git commit -m "Update domains.txt with new list of domains"
+        
+        # 提交更改
+        git commit -m "Update domains.txt with new list of domains" || echo "No changes to commit"
+        
+        # 推送到远程仓库
         git push --set-upstream git@github.com:Mercury000/extract-domain.git main
